@@ -1,0 +1,3 @@
+# Python dependencies for the NVIDIA GPU configuration.
+# System requirements on Windows: NVIDIA driver, CUDA 12 cuBLAS and cuDNN 9.
+-r requirements.txt

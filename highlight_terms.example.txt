@@ -1,0 +1,1 @@
+# Optional: add one word or phrase per line, then save as highlight_terms.txt.

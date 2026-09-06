@@ -29,6 +29,26 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "port"):
             Settings(port=70000)
 
+    def test_rejects_unknown_audio_backend(self):
+        with self.assertRaisesRegex(ValueError, "audio_backend"):
+            Settings(audio_backend="unknown")
+
+    def test_rejects_unknown_language_mode(self):
+        with self.assertRaisesRegex(ValueError, "language_mode"):
+            Settings(language_mode="unknown")
+
+    def test_rejects_zero_max_pending_phrases(self):
+        with self.assertRaisesRegex(ValueError, "max_pending_phrases"):
+            Settings(max_pending_phrases=0)
+
+    def test_rejects_zero_language_detection_interval(self):
+        with self.assertRaisesRegex(ValueError, "language_detection_interval"):
+            Settings(language_detection_interval=0)
+
+    def test_rejects_invalid_no_speech_threshold(self):
+        with self.assertRaisesRegex(ValueError, "no_speech_threshold"):
+            Settings(no_speech_threshold=1.1)
+
 
 if __name__ == "__main__":
     unittest.main()

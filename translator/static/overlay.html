@@ -7,8 +7,12 @@
   <style>
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
     body { display: flex; align-items: flex-end; justify-content: center; font-family: Arial, sans-serif; }
-    #caption {
-      max-width: 85%; margin-bottom: 6%; padding: .25em .5em;
+    #captions {
+      width: 100%; min-height: 1px; margin-bottom: 6%;
+      display: flex; flex-direction: column; align-items: center;
+    }
+    .caption {
+      max-width: 85%; padding: .25em .5em;
       color: white; background: transparent; text-align: center;
       font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
       font-size: clamp(32px, 4.5vw, 68px); font-weight: 400; line-height: 1.08;
@@ -18,35 +22,56 @@
       text-shadow: 0 3px 2px black, 2px 2px 2px black, -2px 2px 2px black;
       opacity: 0; transition: opacity 160ms ease;
     }
-    #caption.visible { opacity: 1; }
-    #caption .highlight {
-      color: #ffd400 !important;
-      -webkit-text-fill-color: #ffd400;
+    .caption.visible { opacity: 1; }
+    .caption.level-2 { opacity: .5; }
+    .caption.level-3 { opacity: .25; }
+    .caption.fading-out {
+      animation: fade-caption 900ms ease-out forwards;
+      pointer-events: none;
     }
-    #caption.typing::after {
+    .caption .highlight {
+      color: var(--highlight-color, #ffd400) !important;
+      -webkit-text-fill-color: var(--highlight-color, #ffd400);
+    }
+    .caption.typing::after {
       content: ""; display: inline-block; width: .08em; height: .82em;
       margin-left: .08em; background: white; box-shadow: 0 0 0 2px black;
       animation: blink 700ms steps(1, end) infinite; vertical-align: -.04em;
     }
     @keyframes blink { 50% { opacity: 0; } }
+    @keyframes fade-caption {
+      from { opacity: .25; }
+      to { opacity: 0; }
+    }
   </style>
 </head>
 <body>
-  <div id="caption" role="status" aria-live="polite"></div>
+  <div id="captions">
+    <div id="caption" class="caption" role="status" aria-live="polite"></div>
+  </div>
   <script>
     const caption = document.querySelector('#caption');
+    const captions = document.querySelector('#captions');
     let sequence = -1;
+    let highlightSignature = '';
     let animationFrame = null;
+    let currentVisible = false;
+    let levelTimer = null;
     const charactersPerSecond = 24;
+    const levelDurationMs = 5000;
 
-    function renderHighlighted(text, terms) {
+    function renderHighlighted(text, highlights) {
       caption.replaceChildren();
-      if (!terms.length) {
+      if (!highlights.length) {
         caption.textContent = text;
         return;
       }
 
-      const escaped = terms
+      const colors = new Map(
+        highlights.map(item => [item.term.toLowerCase(), item.color || '#ffd400'])
+      );
+      const escaped = highlights
+        .map(item => item.term)
         .filter(Boolean)
         .sort((a, b) => b.length - a.length)
         .map(term => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
@@ -57,13 +82,16 @@
         const highlighted = document.createElement('span');
         highlighted.className = 'highlight';
         highlighted.textContent = match[0];
+        highlighted.style.setProperty(
+          '--highlight-color', colors.get(match[0].toLowerCase()) || '#ffd400'
+        );
         caption.append(highlighted);
         cursor = match.index + match[0].length;
       }
       caption.append(document.createTextNode(text.slice(cursor)));
     }
 
-    function typeCaption(text, highlightTerms) {
+    function typeCaption(text, highlights) {
       if (animationFrame) cancelAnimationFrame(animationFrame);
       const current = caption.textContent;
       const canAppend = text.startsWith(current);
@@ -77,7 +105,7 @@
           text.length,
           initialCount + Math.floor((now - startedAt) * charactersPerSecond / 1000)
         );
-        renderHighlighted(text.slice(0, count), highlightTerms);
+        renderHighlighted(text.slice(0, count), highlights);
         if (count < text.length) {
           animationFrame = requestAnimationFrame(type);
         } else {
@@ -88,16 +116,87 @@
       animationFrame = requestAnimationFrame(type);
     }
 
+    function moveCurrentCaptionToHistory() {
+      if (!caption.textContent || !caption.classList.contains('visible')) return;
+      removeLevelThree();
+      const levelTwo = captions.querySelector('.level-2');
+      if (levelTwo) levelTwo.classList.replace('level-2', 'level-3');
+      const previous = caption.cloneNode(true);
+      previous.removeAttribute('id');
+      previous.classList.remove('typing', 'visible');
+      previous.classList.add('level-2');
+      captions.insertBefore(previous, caption);
+    }
+
+    function removeLevelThree() {
+      const levelThree = captions.querySelector('.level-3');
+      if (!levelThree) return;
+      levelThree.classList.add('fading-out');
+      levelThree.addEventListener('animationend', () => levelThree.remove(), { once: true });
+    }
+
+    function advanceCaptionLevel() {
+      if (caption.textContent && caption.classList.contains('visible')) {
+        moveCurrentCaptionToHistory();
+        clearCurrentCaption();
+      } else {
+        const levelTwo = captions.querySelector('.level-2');
+        if (levelTwo) {
+          removeLevelThree();
+          levelTwo.classList.replace('level-2', 'level-3');
+        } else {
+          removeLevelThree();
+        }
+      }
+      if (captions.querySelector('.level-2, .level-3')) {
+        levelTimer = setTimeout(advanceCaptionLevel, levelDurationMs);
+      } else {
+        levelTimer = null;
+      }
+    }
+
+    function restartLevelTimer() {
+      if (levelTimer) clearTimeout(levelTimer);
+      levelTimer = setTimeout(advanceCaptionLevel, levelDurationMs);
+    }
+
+    function clearCurrentCaption() {
+      if (animationFrame) cancelAnimationFrame(animationFrame);
+      animationFrame = null;
+      caption.replaceChildren();
+      caption.classList.remove('typing', 'visible');
+    }
+
     async function refresh() {
       try {
         const response = await fetch('/api/caption', { cache: 'no-store' });
         const data = await response.json();
-        if (data.sequence !== sequence) {
+        const highlights = data.highlights || (data.highlight_terms || []).map(
+          term => ({ term, color: '#ffd400' })
+        );
+        const nextHighlightSignature = JSON.stringify(highlights);
+        if (data.sequence !== sequence || nextHighlightSignature !== highlightSignature) {
           sequence = data.sequence;
-          if (data.text) typeCaption(data.text, data.highlight_terms || []);
+          highlightSignature = nextHighlightSignature;
+          if (data.text) {
+            moveCurrentCaptionToHistory();
+            typeCaption(data.text, highlights);
+            restartLevelTimer();
+          }
         }
-        caption.classList.toggle('visible', data.visible);
+        if (currentVisible && !data.visible) {
+          const hasCurrentCaption = Boolean(caption.textContent);
+          if (hasCurrentCaption) {
+            moveCurrentCaptionToHistory();
+            clearCurrentCaption();
+            restartLevelTimer();
+          }
+        } else {
+          caption.classList.toggle('visible', data.visible);
+        }
+        currentVisible = data.visible;
       } catch (_) {
+        currentVisible = false;
         caption.classList.remove('visible');
       }
     }

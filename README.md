@@ -1,5 +1,9 @@
 # Live Twitch Translator
 
+[![Tests](https://github.com/ElStickman/OBS_live_translator/actions/workflows/tests.yml/badge.svg)](https://github.com/ElStickman/OBS_live_translator/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?logo=githubsponsors)](https://github.com/sponsors/ElStickman)
+
 A local Spanish-to-English speech translator that displays English captions as
 a transparent OBS browser source. Audio is processed locally and is neither
 stored nor sent to Twitch.
@@ -96,8 +100,8 @@ Every command must succeed. The returned paths must target `x86_64`, not
 ### 2. Download the project
 
 ```powershell
-git clone <repository-url>
-cd RaspberryTwitchBot
+git clone https://github.com/ElStickman/OBS_live_translator.git
+cd Traductor_OBS
 ```
 
 If the project is already downloaded, open PowerShell in its directory instead.
@@ -117,34 +121,60 @@ The repository includes `config.json` with ready-to-run NVIDIA defaults. Edit it
 to change the model, microphone, sensitivity, overlay address, or caption
 duration. No configuration copy step is required.
 
-### 5. Select the microphone
+### 5. Run and select the audio source
 
-List the available audio devices:
+The deployment script creates or reuses `.venv`, checks dependencies, and starts
+the application:
+
+```bash
+bash deploy.sh
+```
+
+On Windows, `deploy.ps1` is also available:
 
 ```powershell
-python main.py --list-devices
+powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 ```
 
-If the correct microphone is not the system default, place its device number in
-`config.json`:
+If `bash deploy.sh` is invoked through WSL while the project uses a Windows
+virtual environment, the script automatically delegates to `deploy.ps1`. This
+keeps CUDA and Windows audio-device access working.
 
-```json
-"input_device": 1
-```
+Your browser opens <http://127.0.0.1:8765/settings>. Select either:
 
-### 6. Run the translator
+- A microphone or recording input.
+- A `WASAPI loopback` source to capture audio played by Windows, such as
+  `SteelSeries Sonar - Chat`.
 
-```powershell
-python main.py
-```
+The selection is saved automatically in the local `audio_selection.json` file;
+manual device-index editing is not required. This file is ignored by Git because
+audio devices are specific to each computer. Whisper starts after you press
+**Save and start translator**.
+
+The settings page remains available while the translator is running. Selecting
+and saving another source switches the live capture stream without reloading the
+Whisper model or restarting the application.
+
+The same page also edits highlighted names and phrases. Enter one term per line
+and save it; captions and Whisper's recognition prompt use the new list
+immediately, without restarting the application. An empty list disables
+highlighting while keeping `highlight_terms.txt` present.
+
+The source-language selector can use automatic detection for every language or
+restrict detection to English and Spanish. In restricted mode, Whisper chooses
+the more likely of those two languages, transcribes English, and translates
+Spanish into English. The selection applies immediately and is saved locally.
+
+To print all sources in the terminal instead, run `bash deploy.sh --list-devices`.
 
 The first run downloads the `large-v3` model and may take several minutes. When
 startup completes, the console displays messages similar to:
 
 ```text
-Whisper model ready.
 OBS overlay: http://127.0.0.1:8765
-Listening for Spanish speech...
+Audio selector: http://127.0.0.1:8765/settings
+Whisper model ready.
+Listening to 'SteelSeries Sonar - Chat ... [Loopback]' at 48000 Hz...
 ```
 
 Speak a short Spanish phrase and open <http://127.0.0.1:8765> in a browser. The
@@ -155,13 +185,19 @@ English translation should appear with the same styling used by OBS.
 After the first installation, start the application with:
 
 ```powershell
-cd RaspberryTwitchBot
-.venv\Scripts\Activate.ps1
-python main.py
+cd Traductor_OBS
+bash deploy.sh
 ```
 
 The model remains in the local Hugging Face cache and is not normally downloaded
 again.
+
+To skip opening the selector and reuse the source saved in
+`audio_selection.json`:
+
+```bash
+bash deploy.sh --no-selector
+```
 
 ## NVIDIA acceleration
 
@@ -206,13 +242,18 @@ Settings are read from the committed `config.json` file:
 - `model`: Whisper model name; `large-v3` provides accurate translation.
 - `device`: `cuda` runs the model on an NVIDIA GPU.
 - `compute_type`: `float16` reduces VRAM use and uses Tensor Cores.
-- `input_device`: optional microphone device name or number; `null` uses the default.
+- `audio_backend`: default backend when no local audio selection exists.
+- `input_device`: default input when no local audio selection exists.
 - `speech_threshold`: raise this value if background noise activates recording.
+- `no_speech_threshold`: Whisper confidence required to treat audio as speech;
+  lower it to reject more noise-generated captions.
 - `min_speech_ms`: minimum speech duration; `250` preserves short words.
 - `silence_ms`: pause used to close a phrase; `450` reduces response latency.
 - `max_phrase_ms`: safety limit for one continuous phrase.
 - `caption_seconds`: number of seconds a caption remains visible.
 - `highlight_terms_file`: file containing words or phrases shown in yellow.
+- `language_mode`: `english_spanish` restricts detection to those languages;
+  `all` enables automatic detection across every language supported by Whisper.
 - `host` and `port`: local address used by the OBS overlay.
 
 To use another configuration file without modifying the default:
@@ -221,12 +262,30 @@ To use another configuration file without modifying the default:
 python main.py --config config.custom.json
 ```
 
+### Gaming and streaming profile
+
+`config.gaming.json` is a lower-latency profile for running the translator on
+the same PC as a game and OBS. It uses the `medium` model, limits each phrase
+to six seconds, keeps only the newest pending phrase, and checks the source
+language again after every three phrases. Start it with:
+
+```powershell
+python main.py --config config.gaming.json
+```
+
+The default `config.json` remains the higher-quality profile. To tune a custom
+profile, use `max_pending_phrases` to limit queued translation work and
+`language_detection_interval` to set how many phrases pass before the next
+English/Spanish language check. A value of `1` checks every phrase.
+
 ## Highlighted words and phrases
 
 `highlight_terms.txt` is optional and ignored by Git so personal names are not
 published. To enable highlighting, copy `highlight_terms.example.txt` to
-`highlight_terms.txt` and add one word or phrase per line. An absent or empty
-file simply disables highlighting. Matching is case-insensitive. These entries
+`highlight_terms.txt` and add one word or phrase per line. Plain lines use the
+default yellow. The settings page can assign a different color to each term and
+saves custom colors after a tab (for example, `ExampleBrand<TAB>#ff3366`). An
+absent or empty file simply disables highlighting. Matching is case-insensitive. These entries
 are also supplied to Whisper as context to improve recognition of names and
 project-specific terminology.
 
@@ -239,8 +298,9 @@ Twitch
 Special phrase
 ```
 
-Restart the application after editing the file. Refresh the browser-source
-cache in OBS if it is still displaying an older overlay version.
+Terms saved from the settings page apply immediately. If you edit the file
+manually, restart the application. Refresh the browser-source cache in OBS only
+if it is still displaying an older overlay version.
 
 ## Tests
 
@@ -255,3 +315,40 @@ python -m unittest discover -s tests -v
 Phrase detection uses a lightweight volume threshold. It works well for a
 controlled microphone signal, but music or substantial background noise may
 require sensitivity calibration or a more advanced voice-activity detector.
+
+Speech recognition and machine translation can be inaccurate. Review captions
+before relying on them for accessibility, safety-critical communication, legal
+interpretation, or other high-impact uses.
+
+## Privacy
+
+Audio is captured and processed locally. The application does not intentionally
+store recordings or send captured audio to the project maintainer. The first run
+connects to Hugging Face to download the selected Whisper model unless it is
+already cached locally.
+
+Do not publish recordings, complete logs, device identifiers, or personal names
+in bug reports. See [SECURITY.md](SECURITY.md) for private vulnerability reports.
+
+## Contributing and support
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md) before opening a pull request. Use GitHub
+Issues for reproducible bugs and feature requests, and read [SUPPORT.md](SUPPORT.md)
+for support expectations.
+
+## Support the project
+
+The software is free and open source. If it is useful to you, consider
+[sponsoring development through GitHub Sponsors](https://github.com/sponsors/ElStickman).
+Sponsorship is optional and does not unlock functionality or guarantee support.
+
+## License
+
+The source code is available under the [MIT License](LICENSE). Third-party
+components keep their respective licenses; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Project branding is addressed
+separately in [TRADEMARKS.md](TRADEMARKS.md).
+
+This independent project is not affiliated with or endorsed by OBS Project,
+Twitch, NVIDIA, Microsoft, SteelSeries, or Hugging Face.

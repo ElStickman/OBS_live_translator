@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .env
+audio_selection.json
 highlight_terms.txt
 .cache/
 .pytest_cache/

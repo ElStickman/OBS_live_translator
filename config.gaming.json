@@ -1,0 +1,8 @@
+{
+  "model": "medium",
+  "max_phrase_ms": 6000,
+  "speech_threshold": 0.025,
+  "no_speech_threshold": 0.55,
+  "max_pending_phrases": 1,
+  "language_detection_interval": 3
+}

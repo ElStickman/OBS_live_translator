@@ -2,6 +2,7 @@
   "model": "large-v3",
   "device": "cuda",
   "compute_type": "float16",
+  "audio_backend": "sounddevice",
   "input_device": null,
   "sample_rate": 16000,
   "block_ms": 100,
@@ -9,8 +10,12 @@
   "min_speech_ms": 250,
   "max_phrase_ms": 12000,
   "speech_threshold": 0.012,
+  "no_speech_threshold": 0.6,
+  "max_pending_phrases": 3,
+  "language_detection_interval": 1,
   "caption_seconds": 8,
   "highlight_terms_file": "highlight_terms.txt",
+  "language_mode": "english_spanish",
   "host": "127.0.0.1",
   "port": 8765
 }

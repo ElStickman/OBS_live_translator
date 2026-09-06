@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live translator settings</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { max-width: 760px; margin: 3rem auto; padding: 0 1.25rem; background: #111; color: #eee; }
+    h1 { margin-bottom: .5rem; } p { color: #aaa; } section { margin-bottom: 3rem; }
+    .preview-link { display: inline-block; margin-bottom: 1rem; color: #c9a7ff; font-weight: 700; }
+    select, input, button { box-sizing: border-box; width: 100%; padding: .85rem; margin-top: 1rem; font: inherit; border-radius: .5rem; }
+    select, input[type="text"] { background: #222; color: white; border: 1px solid #555; }
+    button { border: 0; background: #9147ff; color: white; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: wait; }
+    [role="status"] { min-height: 1.5rem; color: #ffd400; }
+    .term-row { display: grid; grid-template-columns: 1fr 4rem 6rem; gap: .6rem; align-items: end; }
+    .term-row input[type="color"] { height: 3.2rem; padding: .25rem; background: #222; border: 1px solid #555; }
+    .term-row button { background: #5c2630; }
+    .empty-terms { color: #777; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>Live translator settings</h1>
+  <a class="preview-link" href="/" target="_blank" rel="noopener">Open subtitle preview</a>
+  <p>The preview URL is also the Browser Source URL for OBS.</p>
+  <section>
+    <h2>Audio source</h2>
+    <p>Microphones appear as inputs. Speaker and virtual-output capture sources appear as WASAPI loopback.</p>
+    <select id="source" disabled><option>Loading audio sources...</option></select>
+    <button id="start" disabled>Save and start translator</button>
+    <p id="status" role="status"></p>
+  </section>
+  <section>
+    <h2>Source languages</h2>
+    <p>Restrict detection when Whisper mistakes speech for an unrelated language.</p>
+    <select id="language-mode">
+      <option value="english_spanish">English + Spanish only</option>
+      <option value="all">All languages</option>
+    </select>
+    <button id="save-language">Save language mode</button>
+    <p id="language-status" role="status"></p>
+  </section>
+  <section>
+    <h2>Highlighted terms</h2>
+    <p>Add names or phrases and choose their caption color. New terms use yellow by default.</p>
+    <div id="terms"></div>
+    <button id="add-term" type="button">Add highlighted term</button>
+    <button id="save-terms">Save highlighted terms</button>
+    <p id="terms-status" role="status"></p>
+  </section>
+  <script>
+    const source = document.querySelector('#source');
+    const start = document.querySelector('#start');
+    const status = document.querySelector('#status');
+    const terms = document.querySelector('#terms');
+    const addTerm = document.querySelector('#add-term');
+    const saveTerms = document.querySelector('#save-terms');
+    const termsStatus = document.querySelector('#terms-status');
+    const languageMode = document.querySelector('#language-mode');
+    const saveLanguage = document.querySelector('#save-language');
+    const languageStatus = document.querySelector('#language-status');
+
+    async function loadSources() {
+      try {
+        const response = await fetch('/api/audio-sources', { cache: 'no-store' });
+        const sources = await response.json();
+        source.replaceChildren();
+        for (const item of sources) {
+          const option = document.createElement('option');
+          option.value = JSON.stringify({ backend: item.backend, device: item.device });
+          option.textContent = `${item.name} - ${item.channels} ch, ${item.sample_rate} Hz`;
+          source.append(option);
+        }
+        source.disabled = !sources.length;
+        start.disabled = !sources.length;
+        status.textContent = sources.length ? '' : 'No capture sources were found.';
+      } catch (error) { status.textContent = `Could not list audio sources: ${error}`; }
+    }
+
+    start.addEventListener('click', async () => {
+      start.disabled = true; status.textContent = 'Saving selection...';
+      try {
+        const response = await fetch('/api/audio-selection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: source.value });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Unknown error');
+        status.textContent = `Active source: ${result.name}. You can switch again at any time.`;
+        start.textContent = 'Switch audio source';
+      } catch (error) { status.textContent = `Could not save source: ${error}`; }
+      finally { start.disabled = false; }
+    });
+
+    async function loadTerms() {
+      try {
+        const response = await fetch('/api/highlight-terms', { cache: 'no-store' });
+        const result = await response.json();
+        terms.replaceChildren();
+        for (const item of result.terms || []) addTermRow(item.term, item.color);
+        showEmptyTermsMessage();
+      } catch (error) { termsStatus.textContent = `Could not load terms: ${error}`; }
+    }
+
+    function showEmptyTermsMessage() {
+      const existing = terms.querySelector('.empty-terms');
+      const hasRows = Boolean(terms.querySelector('.term-row'));
+      if (hasRows && existing) existing.remove();
+      if (!hasRows && !existing) {
+        const empty = document.createElement('p');
+        empty.className = 'empty-terms';
+        empty.textContent = 'No highlighted terms. Highlighting is disabled.';
+        terms.append(empty);
+      }
+    }
+
+    function addTermRow(term = '', color = '#ffd400') {
+      terms.querySelector('.empty-terms')?.remove();
+      const row = document.createElement('div');
+      row.className = 'term-row';
+      const name = document.createElement('input');
+      name.type = 'text'; name.value = term; name.maxLength = 100;
+      name.placeholder = 'Name or phrase'; name.setAttribute('aria-label', 'Highlighted term');
+      const picker = document.createElement('input');
+      picker.type = 'color'; picker.value = color || '#ffd400';
+      picker.setAttribute('aria-label', `Color for ${term || 'term'}`);
+      const remove = document.createElement('button');
+      remove.type = 'button'; remove.textContent = 'Remove';
+      remove.addEventListener('click', () => { row.remove(); showEmptyTermsMessage(); });
+      row.append(name, picker, remove);
+      terms.append(row);
+      if (!term) name.focus();
+    }
+
+    addTerm.addEventListener('click', () => addTermRow());
+
+    async function loadLanguageMode() {
+      try {
+        const response = await fetch('/api/language-mode', { cache: 'no-store' });
+        const result = await response.json();
+        languageMode.value = result.mode;
+      } catch (error) { languageStatus.textContent = `Could not load language mode: ${error}`; }
+    }
+
+    saveLanguage.addEventListener('click', async () => {
+      saveLanguage.disabled = true; languageStatus.textContent = 'Saving language mode...';
+      try {
+        const response = await fetch('/api/language-mode', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: languageMode.value }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Unknown error');
+        languageStatus.textContent = 'Language mode active immediately.';
+      } catch (error) { languageStatus.textContent = `Could not save language mode: ${error}`; }
+      finally { saveLanguage.disabled = false; }
+    });
+
+    saveTerms.addEventListener('click', async () => {
+      saveTerms.disabled = true; termsStatus.textContent = 'Saving terms...';
+      try {
+        const values = [...terms.querySelectorAll('.term-row')].map(row => ({
+          term: row.querySelector('input[type="text"]').value,
+          color: row.querySelector('input[type="color"]').value,
+        }));
+        const response = await fetch('/api/highlight-terms', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ terms: values }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Unknown error');
+        terms.replaceChildren();
+        for (const item of result.terms) addTermRow(item.term, item.color);
+        showEmptyTermsMessage();
+        termsStatus.textContent = `${result.terms.length} terms active immediately.`;
+      } catch (error) { termsStatus.textContent = `Could not save terms: ${error}`; }
+      finally { saveTerms.disabled = false; }
+    });
+
+    loadSources(); loadTerms(); loadLanguageMode();
+  </script>
+</body>
+</html>

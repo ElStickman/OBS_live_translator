@@ -1,1 +1,3 @@
 # Optional: add one word or phrase per line, then save as highlight_terms.txt.
+# Plain terms use yellow. A custom color can follow a tab, for example:
+# ExampleBrand<TAB>#ff3366

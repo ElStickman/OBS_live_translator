@@ -74,6 +74,29 @@ The RTX 5080 configuration used during development has ample capacity for
 
 ## First-time setup and run on Windows
 
+### Desktop executable
+
+The Windows desktop build opens the settings in its own window. The OBS overlay
+remains at `http://127.0.0.1:8765`. See [DISTRIBUTION.md](DISTRIBUTION.md) for
+end-user requirements, startup, saved settings and troubleshooting.
+
+To build the distributable ZIP from source on Windows with Python 3.10 or later:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build.ps1
+```
+
+The script creates an isolated `.venv-build` and produces
+`dist/LiveTwitchTranslator-windows-x64.zip`. Share the entire ZIP, not the EXE
+alone. It includes Python and application libraries, but not the Whisper model
+or NVIDIA system components. The manual **Build Windows desktop** GitHub Actions
+workflow also produces this ZIP as a downloadable artifact; it does not publish
+a release automatically.
+
+For desktop development: install `requirements-desktop.txt` and run
+`python desktop.py`. The existing `deploy.ps1`, `deploy.sh` and `main.py` commands
+remain available for browser-based operation.
+
 ### 1. Install system dependencies
 
 Install these before setting up the Python project:
@@ -155,6 +178,15 @@ The settings page remains available while the translator is running. Selecting
 and saving another source switches the live capture stream without reloading the
 Whisper model or restarting the application.
 
+The last saved source is selected again when you reopen settings. If it is
+unavailable, reconnect it and refresh, or explicitly choose another source.
+Use **Refresh audio sources** after connecting a device. Saving a source requests
+startup or switching; the confirmation does not mean the model has finished
+loading. The settings page displays the overlay address for your OBS Browser
+Source and disables editing while settings are loading or being saved.
+The overlay shows complete captions immediately when the browser requests
+reduced motion.
+
 The same page also edits highlighted names and phrases. Enter one term per line
 and save it; captions and Whisper's recognition prompt use the new list
 immediately, without restarting the application. An empty list disables
@@ -232,8 +264,11 @@ required CUDA library is unavailable, startup stops with a configuration error.
 3. Set its resolution to 1920 × 1080.
 4. Enable the option to refresh the browser when the scene becomes active.
 
-The page background is transparent. A caption appears after a spoken phrase is
-translated and disappears after eight seconds by default.
+The page background is transparent. Up to three captions are shown, with older
+captions sliding upward when a new one arrives at the bottom. Each caption stays
+at full opacity for five seconds, then fades linearly to zero over ten seconds
+and disappears. Moving upward does not restart its lifetime. A fourth caption
+replaces the oldest one immediately.
 
 ## Configuration
 
@@ -250,7 +285,8 @@ Settings are read from the committed `config.json` file:
 - `min_speech_ms`: minimum speech duration; `250` preserves short words.
 - `silence_ms`: pause used to close a phrase; `450` reduces response latency.
 - `max_phrase_ms`: safety limit for one continuous phrase.
-- `caption_seconds`: number of seconds a caption remains visible.
+- `caption_seconds`: how long the API offers a caption to newly connected
+  overlays. Once displayed, the overlay uses the 15-second lifetime above.
 - `highlight_terms_file`: file containing words or phrases shown in yellow.
 - `language_mode`: `english_spanish` restricts detection to those languages;
   `all` enables automatic detection across every language supported by Whisper.
@@ -280,9 +316,9 @@ English/Spanish language check. A value of `1` checks every phrase.
 
 ## Highlighted words and phrases
 
-`highlight_terms.txt` is optional and ignored by Git so personal names are not
-published. To enable highlighting, copy `highlight_terms.example.txt` to
-`highlight_terms.txt` and add one word or phrase per line. Plain lines use the
+`highlight_terms.txt` is created empty on first run and ignored by Git so personal
+names are not published. Add terms in settings or edit the file with one word or
+phrase per line. No example file is required or distributed. Plain lines use the
 default yellow. The settings page can assign a different color to each term and
 saves custom colors after a tab (for example, `ExampleBrand<TAB>#ff3366`). An
 absent or empty file simply disables highlighting. Matching is case-insensitive. These entries

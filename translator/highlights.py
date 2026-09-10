@@ -12,7 +12,7 @@ def load_highlight_config(path: str) -> tuple[list[str], dict[str, str]]:
     """Load terms and colors; plain legacy lines keep the default yellow."""
     file_path = Path(path)
     if not file_path.exists():
-        return [], {}
+        file_path.touch(exist_ok=True)
 
     terms: list[str] = []
     colors: dict[str, str] = {}

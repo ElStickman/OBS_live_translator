@@ -4,6 +4,11 @@ __pycache__/
 .env
 audio_selection.json
 highlight_terms.txt
+highlight_terms.example.txt
+.venv-build/
+build/
+dist/
+*.spec
 .cache/
 .pytest_cache/
 .coverage

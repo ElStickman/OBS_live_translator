@@ -10,6 +10,8 @@ Primary runtime components include:
 | faster-whisper | MIT | https://github.com/SYSTRAN/faster-whisper |
 | CTranslate2 | MIT | https://github.com/OpenNMT/CTranslate2 |
 | Flask | BSD-3-Clause | https://github.com/pallets/flask |
+| pywebview | BSD-3-Clause | https://github.com/r0x0r/pywebview |
+| Python.NET | MIT | https://github.com/pythonnet/pythonnet |
 | NumPy | BSD-3-Clause | https://github.com/numpy/numpy |
 | python-sounddevice | MIT | https://github.com/spatialaudio/python-sounddevice |
 | PyAudioWPatch | Apache-2.0 | https://github.com/s0d3s/PyAudioWPatch |

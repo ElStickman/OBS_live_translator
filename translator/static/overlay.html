@@ -9,9 +9,10 @@
     body { display: flex; align-items: flex-end; justify-content: center; font-family: Arial, sans-serif; }
     #captions {
       width: 100%; min-height: 1px; margin-bottom: 6%;
-      display: flex; flex-direction: column; align-items: center;
+      position: relative; display: flex; justify-content: center;
     }
     .caption {
+      position: absolute; bottom: 0; width: max-content;
       max-width: 85%; padding: .25em .5em;
       color: white; background: transparent; text-align: center;
       font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
@@ -20,13 +21,8 @@
       -webkit-text-stroke: clamp(2px, .18vw, 4px) black;
       paint-order: stroke fill;
       text-shadow: 0 3px 2px black, 2px 2px 2px black, -2px 2px 2px black;
-      opacity: 0; transition: opacity 160ms ease;
-    }
-    .caption.visible { opacity: 1; }
-    .caption.level-2 { opacity: .5; }
-    .caption.level-3 { opacity: .25; }
-    .caption.fading-out {
-      animation: fade-caption 900ms ease-out forwards;
+      opacity: 1; transition: transform 350ms ease;
+      animation: fade-caption 10s linear 5s forwards;
       pointer-events: none;
     }
     .caption .highlight {
@@ -40,27 +36,46 @@
     }
     @keyframes blink { 50% { opacity: 0; } }
     @keyframes fade-caption {
-      from { opacity: .25; }
+      from { opacity: 1; }
       to { opacity: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .caption { transition: none; }
+      .caption.typing::after { animation: none; }
     }
   </style>
 </head>
 <body>
-  <div id="captions">
-    <div id="caption" class="caption" role="status" aria-live="polite"></div>
-  </div>
+  <div id="captions" role="status" aria-live="polite"></div>
   <script>
-    const caption = document.querySelector('#caption');
+    let caption = null;
     const captions = document.querySelector('#captions');
     let sequence = -1;
     let highlightSignature = '';
     let animationFrame = null;
-    let currentVisible = false;
-    let levelTimer = null;
     const charactersPerSecond = 24;
-    const levelDurationMs = 5000;
 
-    function renderHighlighted(text, highlights) {
+    function layoutCaptions() {
+      let offset = 0;
+      for (const item of [...captions.children].reverse()) {
+        item.style.transform = `translateY(-${offset}px)`;
+        offset += item.offsetHeight;
+      }
+    }
+    const resizeObserver = new ResizeObserver(layoutCaptions);
+
+    function removeCaption(item) {
+      if (item === caption) {
+        if (animationFrame) cancelAnimationFrame(animationFrame);
+        animationFrame = null;
+        caption = null;
+      }
+      resizeObserver.unobserve(item);
+      item.remove();
+      layoutCaptions();
+    }
+
+    function renderHighlighted(text, highlights, caption) {
       caption.replaceChildren();
       if (!highlights.length) {
         caption.textContent = text;
@@ -93,6 +108,12 @@
 
     function typeCaption(text, highlights) {
       if (animationFrame) cancelAnimationFrame(animationFrame);
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        renderHighlighted(text, highlights, caption);
+        caption.classList.remove('typing');
+        animationFrame = null;
+        return;
+      }
       const current = caption.textContent;
       const canAppend = text.startsWith(current);
       const initialCount = canAppend ? current.length : 0;
@@ -105,7 +126,7 @@
           text.length,
           initialCount + Math.floor((now - startedAt) * charactersPerSecond / 1000)
         );
-        renderHighlighted(text.slice(0, count), highlights);
+        renderHighlighted(text.slice(0, count), highlights, caption);
         if (count < text.length) {
           animationFrame = requestAnimationFrame(type);
         } else {
@@ -116,55 +137,27 @@
       animationFrame = requestAnimationFrame(type);
     }
 
-    function moveCurrentCaptionToHistory() {
-      if (!caption.textContent || !caption.classList.contains('visible')) return;
-      removeLevelThree();
-      const levelTwo = captions.querySelector('.level-2');
-      if (levelTwo) levelTwo.classList.replace('level-2', 'level-3');
-      const previous = caption.cloneNode(true);
-      previous.removeAttribute('id');
-      previous.classList.remove('typing', 'visible');
-      previous.classList.add('level-2');
-      captions.insertBefore(previous, caption);
-    }
-
-    function removeLevelThree() {
-      const levelThree = captions.querySelector('.level-3');
-      if (!levelThree) return;
-      levelThree.classList.add('fading-out');
-      levelThree.addEventListener('animationend', () => levelThree.remove(), { once: true });
-    }
-
-    function advanceCaptionLevel() {
-      if (caption.textContent && caption.classList.contains('visible')) {
-        moveCurrentCaptionToHistory();
-        clearCurrentCaption();
-      } else {
-        const levelTwo = captions.querySelector('.level-2');
-        if (levelTwo) {
-          removeLevelThree();
-          levelTwo.classList.replace('level-2', 'level-3');
-        } else {
-          removeLevelThree();
-        }
-      }
-      if (captions.querySelector('.level-2, .level-3')) {
-        levelTimer = setTimeout(advanceCaptionLevel, levelDurationMs);
-      } else {
-        levelTimer = null;
-      }
-    }
-
-    function restartLevelTimer() {
-      if (levelTimer) clearTimeout(levelTimer);
-      levelTimer = setTimeout(advanceCaptionLevel, levelDurationMs);
-    }
-
-    function clearCurrentCaption() {
+    function addCaption(text, highlights) {
       if (animationFrame) cancelAnimationFrame(animationFrame);
       animationFrame = null;
-      caption.replaceChildren();
-      caption.classList.remove('typing', 'visible');
+      if (caption) {
+        renderHighlighted(caption.dataset.text, highlights, caption);
+        caption.classList.remove('typing');
+      }
+      if (captions.children.length === 3) removeCaption(captions.firstElementChild);
+      caption = document.createElement('div');
+      caption.className = 'caption';
+      caption.dataset.text = text;
+      const item = caption;
+      item.addEventListener('animationend', event => {
+        if (event.animationName === 'fade-caption' && event.target === item) {
+          removeCaption(item);
+        }
+      });
+      captions.append(caption);
+      resizeObserver.observe(caption);
+      typeCaption(text, highlights);
+      layoutCaptions();
     }
 
     async function refresh() {
@@ -175,29 +168,19 @@
           term => ({ term, color: '#ffd400' })
         );
         const nextHighlightSignature = JSON.stringify(highlights);
-        if (data.sequence !== sequence || nextHighlightSignature !== highlightSignature) {
+        if (data.sequence !== sequence) {
           sequence = data.sequence;
+          if (data.text && data.visible) addCaption(data.text, highlights);
+        }
+        if (nextHighlightSignature !== highlightSignature) {
           highlightSignature = nextHighlightSignature;
-          if (data.text) {
-            moveCurrentCaptionToHistory();
-            typeCaption(data.text, highlights);
-            restartLevelTimer();
+          for (const item of captions.children) {
+            renderHighlighted(item.textContent, highlights, item);
           }
+          if (caption && animationFrame) typeCaption(caption.dataset.text, highlights);
         }
-        if (currentVisible && !data.visible) {
-          const hasCurrentCaption = Boolean(caption.textContent);
-          if (hasCurrentCaption) {
-            moveCurrentCaptionToHistory();
-            clearCurrentCaption();
-            restartLevelTimer();
-          }
-        } else {
-          caption.classList.toggle('visible', data.visible);
-        }
-        currentVisible = data.visible;
       } catch (_) {
-        currentVisible = false;
-        caption.classList.remove('visible');
+        // Existing captions keep their own lifetime during connection failures.
       }
     }
     setInterval(refresh, 200);

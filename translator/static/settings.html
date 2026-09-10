@@ -5,48 +5,67 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Live translator settings</title>
   <style>
-    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
-    body { max-width: 760px; margin: 3rem auto; padding: 0 1.25rem; background: #111; color: #eee; }
-    h1 { margin-bottom: .5rem; } p { color: #aaa; } section { margin-bottom: 3rem; }
-    .preview-link { display: inline-block; margin-bottom: 1rem; color: #c9a7ff; font-weight: 700; }
+    :root { color-scheme: dark; font-family: "Segoe UI", sans-serif; background: #101923; color: #edf3fa; }
+    body { max-width: 860px; margin: 3rem auto; padding: 0 1.25rem; }
+    h1 { margin-bottom: .5rem; font-family: "Bahnschrift", "Segoe UI", sans-serif; font-size: clamp(1.8rem, 5vw, 2.6rem); }
+    h2 { margin-top: 0; font-size: 1.25rem; } p { color: #b9c8d8; line-height: 1.6; }
+    section { margin: 1.25rem 0; padding: 1.5rem; background: #192735; border: 1px solid #42566c; border-radius: .75rem; }
+    .preview-link { display: inline-block; color: #b9a4ff; font-weight: 700; }
+    .overlay-address { display: block; padding: .75rem; border-left: 3px solid #b9a4ff; overflow-wrap: anywhere; user-select: all; font-family: Consolas, monospace; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
     select, input, button { box-sizing: border-box; width: 100%; padding: .85rem; margin-top: 1rem; font: inherit; border-radius: .5rem; }
     select, input[type="text"] { background: #222; color: white; border: 1px solid #555; }
     button { border: 0; background: #9147ff; color: white; font-weight: 700; cursor: pointer; }
     button:disabled { opacity: .5; cursor: wait; }
+    button.secondary { background: transparent; border: 1px solid #8295aa; color: #edf3fa; }
+    button:not(:disabled):hover { filter: brightness(1.15); }
+    :focus-visible { outline: 3px solid #ffd400; outline-offset: 3px; }
     [role="status"] { min-height: 1.5rem; color: #ffd400; }
     .term-row { display: grid; grid-template-columns: 1fr 4rem 6rem; gap: .6rem; align-items: end; }
     .term-row input[type="color"] { height: 3.2rem; padding: .25rem; background: #222; border: 1px solid #555; }
     .term-row button { background: #5c2630; }
-    .empty-terms { color: #777; font-style: italic; }
+    .empty-terms { color: #b9c8d8; }
+    @media (max-width: 480px) {
+      body { margin: 1.5rem auto; padding: 0 .75rem; }
+      section { padding: 1rem; }
+      .term-row { grid-template-columns: minmax(0, 1fr) 3.5rem; }
+      .term-row button { grid-column: 1 / -1; margin-top: 0; }
+      .term-row input { min-width: 0; }
+    }
   </style>
 </head>
 <body>
   <h1>Live translator settings</h1>
+  <p id="runtime-status" role="status">Connecting to translator...</p>
   <a class="preview-link" href="/" target="_blank" rel="noopener">Open subtitle preview</a>
   <p>The preview URL is also the Browser Source URL for OBS.</p>
+  <code class="overlay-address" id="overlay-address"></code>
   <section>
     <h2>Audio source</h2>
     <p>Microphones appear as inputs. Speaker and virtual-output capture sources appear as WASAPI loopback.</p>
-    <select id="source" disabled><option>Loading audio sources...</option></select>
+    <label for="source">Capture device</label>
+    <select id="source" disabled><option value="">Loading audio sources...</option></select>
+    <button id="refresh-sources" class="secondary" type="button">Refresh audio sources</button>
     <button id="start" disabled>Save and start translator</button>
     <p id="status" role="status"></p>
   </section>
   <section>
     <h2>Source languages</h2>
     <p>Restrict detection when Whisper mistakes speech for an unrelated language.</p>
-    <select id="language-mode">
+    <label for="language-mode">Languages to recognize · output is English</label>
+    <select id="language-mode" disabled>
       <option value="english_spanish">English + Spanish only</option>
       <option value="all">All languages</option>
     </select>
-    <button id="save-language">Save language mode</button>
+    <button id="save-language" disabled>Save language mode</button>
     <p id="language-status" role="status"></p>
   </section>
   <section>
     <h2>Highlighted terms</h2>
     <p>Add names or phrases and choose their caption color. New terms use yellow by default.</p>
     <div id="terms"></div>
-    <button id="add-term" type="button">Add highlighted term</button>
-    <button id="save-terms">Save highlighted terms</button>
+    <button id="add-term" class="secondary" type="button" disabled>Add highlighted term</button>
+    <button id="save-terms" disabled>Save highlighted terms</button>
     <p id="terms-status" role="status"></p>
   </section>
   <script>
@@ -60,11 +79,27 @@
     const languageMode = document.querySelector('#language-mode');
     const saveLanguage = document.querySelector('#save-language');
     const languageStatus = document.querySelector('#language-status');
+    const refreshSources = document.querySelector('#refresh-sources');
+    document.querySelector('#overlay-address').textContent = new URL('/', location.href).href;
+
+    async function readResponse(response) {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
+      return result;
+    }
+    refreshSources.addEventListener('click', loadSources);
+    source.addEventListener('change', () => { start.disabled = !source.value; });
 
     async function loadSources() {
+      const previous = source.value;
+      source.disabled = true; start.disabled = true; refreshSources.disabled = true;
+      status.textContent = 'Looking for audio sources...';
       try {
         const response = await fetch('/api/audio-sources', { cache: 'no-store' });
-        const sources = await response.json();
+        const sources = await readResponse(response);
+        const saved = await readResponse(await fetch('/api/audio-selection', { cache: 'no-store' }));
+        const remembered = saved.device == null ? '' : JSON.stringify({backend: saved.backend, device: Number(saved.device)});
+        const preferred = previous || remembered;
         source.replaceChildren();
         for (const item of sources) {
           const option = document.createElement('option');
@@ -72,32 +107,39 @@
           option.textContent = `${item.name} - ${item.channels} ch, ${item.sample_rate} Hz`;
           source.append(option);
         }
+        const restored = sources.length && [...source.options].some(option => option.value === preferred);
+        if (restored) source.value = preferred;
+        else if (preferred) source.selectedIndex = -1;
         source.disabled = !sources.length;
-        start.disabled = !sources.length;
-        status.textContent = sources.length ? '' : 'No capture sources were found.';
+        start.disabled = !source.value;
+        status.textContent = sources.length ? 'Choose a device, then save to apply it.' : 'No capture sources found. Connect a microphone or enable an output device, then refresh.';
+        if (restored && preferred === remembered) status.textContent = 'Saved audio source restored. Press Save and start translator to begin.';
+        else if (preferred && !restored) status.textContent = 'The previous audio source is unavailable. Reconnect it and refresh, or choose another device.';
       } catch (error) { status.textContent = `Could not list audio sources: ${error}`; }
+      finally { refreshSources.disabled = false; }
     }
 
     start.addEventListener('click', async () => {
-      start.disabled = true; status.textContent = 'Saving selection...';
+      start.disabled = true; source.disabled = true; refreshSources.disabled = true; status.textContent = 'Saving selection...';
       try {
         const response = await fetch('/api/audio-selection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: source.value });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Unknown error');
-        status.textContent = `Active source: ${result.name}. You can switch again at any time.`;
+        status.textContent = `Saved: ${result.name}. Translator startup or switching was requested. The first model load may take a few minutes.`;
         start.textContent = 'Switch audio source';
       } catch (error) { status.textContent = `Could not save source: ${error}`; }
-      finally { start.disabled = false; }
+      finally { start.disabled = false; source.disabled = false; refreshSources.disabled = false; }
     });
 
     async function loadTerms() {
       try {
         const response = await fetch('/api/highlight-terms', { cache: 'no-store' });
-        const result = await response.json();
+        const result = await readResponse(response);
         terms.replaceChildren();
         for (const item of result.terms || []) addTermRow(item.term, item.color);
         showEmptyTermsMessage();
-      } catch (error) { termsStatus.textContent = `Could not load terms: ${error}`; }
+        addTerm.disabled = false; saveTerms.disabled = false;
+      } catch (error) { termsStatus.textContent = `Could not load terms: ${error}. Reload this page to retry.`; }
     }
 
     function showEmptyTermsMessage() {
@@ -124,7 +166,12 @@
       picker.setAttribute('aria-label', `Color for ${term || 'term'}`);
       const remove = document.createElement('button');
       remove.type = 'button'; remove.textContent = 'Remove';
-      remove.addEventListener('click', () => { row.remove(); showEmptyTermsMessage(); });
+      remove.setAttribute('aria-label', `Remove ${term || 'highlighted term'}`);
+      name.addEventListener('input', () => {
+        picker.setAttribute('aria-label', `Color for ${name.value || 'term'}`);
+        remove.setAttribute('aria-label', `Remove ${name.value || 'highlighted term'}`);
+      });
+      remove.addEventListener('click', () => { row.remove(); showEmptyTermsMessage(); addTerm.focus(); });
       row.append(name, picker, remove);
       terms.append(row);
       if (!term) name.focus();
@@ -135,24 +182,27 @@
     async function loadLanguageMode() {
       try {
         const response = await fetch('/api/language-mode', { cache: 'no-store' });
-        const result = await response.json();
+        const result = await readResponse(response);
         languageMode.value = result.mode;
-      } catch (error) { languageStatus.textContent = `Could not load language mode: ${error}`; }
+        languageMode.disabled = false; saveLanguage.disabled = false;
+      } catch (error) { languageStatus.textContent = `Could not load language mode: ${error}. Reload this page to retry.`; }
     }
 
     saveLanguage.addEventListener('click', async () => {
-      saveLanguage.disabled = true; languageStatus.textContent = 'Saving language mode...';
+      saveLanguage.disabled = true; languageMode.disabled = true; languageStatus.textContent = 'Saving language mode...';
       try {
         const response = await fetch('/api/language-mode', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: languageMode.value }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Unknown error');
         languageStatus.textContent = 'Language mode active immediately.';
       } catch (error) { languageStatus.textContent = `Could not save language mode: ${error}`; }
-      finally { saveLanguage.disabled = false; }
+      finally { saveLanguage.disabled = false; languageMode.disabled = false; }
     });
 
     saveTerms.addEventListener('click', async () => {
       saveTerms.disabled = true; termsStatus.textContent = 'Saving terms...';
+      addTerm.disabled = true;
+      terms.querySelectorAll('input, button').forEach(control => { control.disabled = true; });
       try {
         const values = [...terms.querySelectorAll('.term-row')].map(row => ({
           term: row.querySelector('input[type="text"]').value,
@@ -166,9 +216,21 @@
         showEmptyTermsMessage();
         termsStatus.textContent = `${result.terms.length} terms active immediately.`;
       } catch (error) { termsStatus.textContent = `Could not save terms: ${error}`; }
-      finally { saveTerms.disabled = false; }
+      finally {
+        saveTerms.disabled = false; addTerm.disabled = false;
+        terms.querySelectorAll('input, button').forEach(control => { control.disabled = false; });
+      }
     });
 
+    async function refreshRuntimeStatus() {
+      const output = document.querySelector('#runtime-status');
+      try {
+        const result = await readResponse(await fetch('/api/status', {cache: 'no-store'}));
+        if (output.textContent !== result.message) output.textContent = result.message;
+      } catch (_) { output.textContent = 'Translator connection lost. Restart the application.'; }
+      setTimeout(refreshRuntimeStatus, 1500);
+    }
+    refreshRuntimeStatus();
     loadSources(); loadTerms(); loadLanguageMode();
   </script>
 </body>

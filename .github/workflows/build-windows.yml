@@ -1,0 +1,28 @@
+name: Build Windows desktop
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Build distributable
+        shell: pwsh
+        run: ./build.ps1
+      - name: Run tests
+        run: ./.venv-build/Scripts/python.exe -m unittest discover -s tests -v
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiveTwitchTranslator-windows-x64
+          path: dist/LiveTwitchTranslator-windows-x64.zip
+          if-no-files-found: error

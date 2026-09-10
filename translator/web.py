@@ -19,9 +19,25 @@ def create_app(
     highlight_colors: dict[str, str] | None = None,
     language_options: dict[str, str] | None = None,
     on_audio_selected: Callable[[], None] | None = None,
+    runtime_status: dict[str, object] | None = None,
 ) -> Flask:
     static_dir = Path(__file__).with_name("static")
     app = Flask(__name__, static_folder=None)
+
+    @app.get("/api/status")
+    def status():
+        return jsonify(runtime_status or {"message": "", "error": False})
+
+    @app.before_request
+    def validate_json_object():
+        if request.method in {"POST", "PUT"}:
+            if not isinstance(request.get_json(silent=True), dict):
+                return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    @app.errorhandler(OSError)
+    def storage_error(error):
+        app.logger.error("Local file operation failed: %s", error)
+        return jsonify({"error": "Could not save or read local settings. Check the saved files and their permissions; see the terminal for details."}), 500
 
     @app.after_request
     def disable_browser_cache(response):
@@ -55,14 +71,28 @@ def create_app(
     def audio_sources():
         return jsonify([source.as_dict() for source in list_audio_sources()])
 
-    def save_local_settings(changes: dict[str, object]) -> None:
+    def load_local_settings() -> dict[str, object]:
         path = Path(selection_path)
         try:
             values = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-        except (json.JSONDecodeError, OSError):
-            values = {}
+        except json.JSONDecodeError:
+            raise OSError("Saved settings contain invalid JSON; refusing to overwrite")
+        if not isinstance(values, dict):
+            raise OSError("Saved settings must be a JSON object; refusing to overwrite")
+        return values
+
+    @app.get("/api/audio-selection")
+    def get_audio_selection():
+        values = load_local_settings()
+        return jsonify({
+            "backend": values.get("audio_backend", "sounddevice"),
+            "device": values.get("input_device"),
+        })
+
+    def save_local_settings(changes: dict[str, object]) -> None:
+        values = load_local_settings()
         values.update(changes)
-        path.write_text(json.dumps(values, indent=2) + "\n", encoding="utf-8")
+        Path(selection_path).write_text(json.dumps(values, indent=2) + "\n", encoding="utf-8")
 
     @app.get("/api/language-mode")
     def get_language_mode():
@@ -71,7 +101,7 @@ def create_app(
     @app.put("/api/language-mode")
     def update_language_mode():
         mode = (request.get_json(silent=True) or {}).get("mode")
-        if mode not in {"all", "english_spanish"}:
+        if not isinstance(mode, str) or mode not in {"all", "english_spanish"}:
             return jsonify({"error": "Invalid language mode"}), 400
         save_local_settings({"language_mode": mode})
         if language_options is not None:
@@ -148,6 +178,11 @@ def create_app(
     def audio_selection():
         payload = request.get_json(silent=True) or {}
         backend = payload.get("backend")
+        if not isinstance(backend, str):
+            return jsonify({"error": "Invalid audio backend"}), 400
+        raw_device = payload.get("device")
+        if isinstance(raw_device, bool) or not isinstance(raw_device, (int, str)):
+            return jsonify({"error": "Invalid audio device"}), 400
         try:
             device = int(payload.get("device"))
         except (TypeError, ValueError):

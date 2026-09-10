@@ -150,7 +150,7 @@
       caption.dataset.text = text;
       const item = caption;
       item.addEventListener('animationend', event => {
-        if (event.animationName === 'fade-caption' && event.target === item) {
+        if (event.target === item) {
           removeCaption(item);
         }
       });

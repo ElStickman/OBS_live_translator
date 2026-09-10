@@ -56,10 +56,9 @@ class OverlayTests(unittest.TestCase):
       addCaption('Third', []);
       addCaption('Fourth', []);
       assert(captions.children.length === 3 && !first.isConnected, 'Three-caption limit failed');
-      for (const item of captions.children) {
-        item.getAnimations().find(a => a.animationName === 'fade-caption').finish();
+      for (const item of [...captions.children]) {
+        item.dispatchEvent(new AnimationEvent('animationend', {animationName: 'fade-caption'}));
       }
-      for (let attempt = 0; attempt < 10 && captions.children.length; attempt++) await pause();
       assert(captions.children.length === 0 && caption === null, 'Expired captions remain');
       addCaption('Motion preference caption', []);
       if (reduced) {

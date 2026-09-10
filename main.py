@@ -4,6 +4,7 @@ import argparse
 import queue
 import threading
 import webbrowser
+from werkzeug.serving import make_server
 
 from translator.audio import PhraseRecorder
 from translator.config import Settings
@@ -14,7 +15,7 @@ from translator.state import CaptionStore
 from translator.web import create_app
 
 
-def main() -> None:
+def main(desktop: bool = False) -> None:
     parser = argparse.ArgumentParser(description="Spanish-to-English live captions for OBS")
     parser.add_argument(
         "--list-devices", action="store_true", help="show audio input devices and exit"
@@ -44,6 +45,8 @@ def main() -> None:
     language_options = {"mode": settings.language_mode}
     captions = CaptionStore()
     controls: queue.Queue[tuple[str, object | None]] = queue.Queue()
+    stopping = threading.Event()
+    runtime_status = {"message": "Choose an audio source to start.", "error": False}
     app = create_app(
         captions,
         highlight_terms,
@@ -52,25 +55,19 @@ def main() -> None:
         highlight_colors=highlight_colors,
         language_options=language_options,
         on_audio_selected=lambda: controls.put(("switch", None)),
+        runtime_status=runtime_status,
     )
 
-    web_thread = threading.Thread(
-        target=lambda: app.run(
-            host=settings.host,
-            port=settings.port,
-            debug=False,
-            use_reloader=False,
-        ),
-        daemon=True,
-    )
+    server = make_server(settings.host, settings.port, app, threaded=True)
+    web_thread = threading.Thread(target=server.serve_forever, daemon=True)
     web_thread.start()
     print(f"OBS overlay: http://{settings.host}:{settings.port}")
 
-    if not args.no_selector:
+    if not args.no_selector and not desktop:
         selector_url = f"http://{settings.host}:{settings.port}/settings"
         print(f"Audio selector: {selector_url}")
         webbrowser.open(selector_url)
-    else:
+    elif args.no_selector:
         controls.put(("switch", None))
 
     translator: TranslationWorker | None = None
@@ -83,15 +80,19 @@ def main() -> None:
         except Exception as error:
             controls.put(("recorder_failed", (active_recorder, error)))
 
-    try:
-        while True:
+    def run_controls() -> None:
+        nonlocal recorder, recorder_thread, translator, settings
+        while not stopping.is_set():
             command, payload = controls.get()
+            if command == "stop":
+                return
             if command == "recorder_failed":
                 failed_recorder, error = payload
                 if failed_recorder is recorder:
                     recorder = None
                     recorder_thread = None
                     print(f"Audio capture failed: {error}")
+                    runtime_status.update(message=f"Audio capture failed: {error}", error=True)
                     print(f"Choose another source at http://{settings.host}:{settings.port}/settings")
                 continue
 
@@ -104,26 +105,58 @@ def main() -> None:
                 if recorder_thread is not None:
                     recorder_thread.join(timeout=5)
 
-            settings = Settings.from_file(args.config, args.audio_selection)
-            if translator is None:
-                translator = TranslationWorker(
-                    settings, captions, highlight_terms, language_options
-                )
-                translator.start()
-                print(f"Highlighted terms: {', '.join(highlight_terms) or 'none'}")
+                if recorder_thread is not None and recorder_thread.is_alive():
+                    runtime_status.update(message="Audio source is still stopping. Try again shortly.", error=True)
+                    continue
 
-            recorder = PhraseRecorder(settings, translator.submit)
-            recorder_thread = threading.Thread(
-                target=run_recorder,
-                args=(recorder,),
-                daemon=True,
+            try:
+                settings = Settings.from_file(args.config, args.audio_selection)
+                if translator is None:
+                    runtime_status.update(message="Loading speech model. The first download may take several minutes.", error=False)
+                    worker = TranslationWorker(settings, captions, highlight_terms, language_options)
+                    worker.start()
+                    translator = worker
+                if stopping.is_set():
+                    return
+                recorder = PhraseRecorder(settings, translator.submit)
+                recorder_thread = threading.Thread(
+                    target=run_recorder,
+                    args=(recorder,),
+                    daemon=True,
+                )
+                runtime_status.update(message="Model ready. Starting audio capture; speak to generate captions.", error=False)
+                recorder_thread.start()
+            except Exception as error:
+                runtime_status.update(message=f"Could not start translator: {error}", error=True)
+                print(runtime_status["message"])
+
+    control_thread = None
+    try:
+        if desktop:
+            import webview
+
+            control_thread = threading.Thread(target=run_controls, daemon=True)
+            control_thread.start()
+            webview.create_window(
+                "Live Twitch Translator", f"http://{settings.host}:{settings.port}/settings",
+                width=960, height=850, min_size=(420, 540),
             )
-            recorder_thread.start()
+            webview.start(gui="edgechromium")
+        else:
+            run_controls()
     except KeyboardInterrupt:
+        pass
+    finally:
+        stopping.set()
+        controls.put(("stop", None))
+        if control_thread is not None:
+            control_thread.join(timeout=5)
         if recorder is not None:
             recorder.stop()
         if recorder_thread is not None:
             recorder_thread.join(timeout=5)
+        server.shutdown()
+        server.server_close()
 
 
 if __name__ == "__main__":

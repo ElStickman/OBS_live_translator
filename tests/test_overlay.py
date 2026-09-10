@@ -20,6 +20,8 @@ class OverlayTests(unittest.TestCase):
     const assert = (condition, message) => { if (!condition) throw Error(message); };
     const pause = () => new Promise(resolve => setTimeout(resolve, 100));
     (async () => {
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      assert(reduced === (location.hash === '#reduce'), 'Browser motion preference was not applied');
       let data = {sequence: 1, text: 'First message', visible: true, highlights: []};
       window.fetch = async () => ({json: async () => data});
       await refresh();
@@ -38,8 +40,8 @@ class OverlayTests(unittest.TestCase):
       assert(first.getAnimations().includes(fade), 'Moving restarted fading');
       assert(fade.currentTime === 10000, 'Moving reset lifetime');
       getComputedStyle(first).transform;
-      assert(first.getAnimations().some(a => a.transitionProperty === 'transform'),
-        'Upward movement is not animated');
+      assert(first.getAnimations().some(a => a.transitionProperty === 'transform') === !reduced,
+        'Upward movement does not respect the motion preference');
       assert(first.style.transform !== 'translateY(0px)', 'Old caption did not move up');
       data = {...data, highlights: [{term: 'First', color: '#ff0000'}]};
       await refresh();
@@ -59,24 +61,29 @@ class OverlayTests(unittest.TestCase):
       }
       for (let attempt = 0; attempt < 10 && captions.children.length; attempt++) await pause();
       assert(captions.children.length === 0 && caption === null, 'Expired captions remain');
-      window.matchMedia = () => ({matches: true});
-      addCaption('Reduced motion caption', []);
-      assert(caption.textContent === 'Reduced motion caption' && animationFrame === null,
-        'Reduced motion still animates typing');
+      addCaption('Motion preference caption', []);
+      if (reduced) {
+        assert(caption.textContent === 'Motion preference caption' && animationFrame === null,
+          'Reduced motion still animates typing');
+      } else {
+        assert(animationFrame !== null, 'Normal motion does not animate typing');
+      }
       document.body.textContent = 'OVERLAY_CHECK_PASSED';
     })().catch(error => { document.body.textContent = 'OVERLAY_CHECK_FAILED: ' + error.message; });
 """
         overlay = overlay.replace("    setInterval(refresh, 200);\n    refresh();", check)
-        with tempfile.TemporaryDirectory() as directory:
-            page = Path(directory) / "overlay.html"
-            page.write_text(overlay, encoding="utf-8")
-            result = subprocess.run([
-                browser, "--headless", "--disable-gpu", "--no-first-run",
-                f"--user-data-dir={directory}/profile", "--dump-dom",
-                "--virtual-time-budget=2000", page.as_uri(),
-            ], capture_output=True, text=True, encoding="utf-8", timeout=30)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("<body>OVERLAY_CHECK_PASSED</body>", result.stdout)
+        for mode, flag in [("full", "--force-prefers-no-reduced-motion"),
+                           ("reduce", "--force-prefers-reduced-motion")]:
+            with self.subTest(motion=mode), tempfile.TemporaryDirectory() as directory:
+                page = Path(directory) / "overlay.html"
+                page.write_text(overlay, encoding="utf-8")
+                result = subprocess.run([
+                    browser, "--headless", "--disable-gpu", "--no-first-run", flag,
+                    f"--user-data-dir={directory}/profile", "--dump-dom",
+                    "--virtual-time-budget=2000", page.as_uri() + "#" + mode,
+                ], capture_output=True, text=True, encoding="utf-8", timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertRegex(result.stdout, r"<body>OVERLAY_CHECK_PASSED\s*</body>")
 
 
 if __name__ == "__main__":

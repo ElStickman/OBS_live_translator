@@ -1,5 +1,5 @@
 faster-whisper==1.2.1
 Flask==3.1.2
-numpy==2.2.6
+numpy==2.5.4
 sounddevice==0.5.2
 PyAudioWPatch==0.2.12.8; platform_system == "Windows"
